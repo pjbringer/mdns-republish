@@ -67,7 +67,8 @@ int resolve_ipv6(const char* hostname, struct sockaddr_in6 *res, int res_length)
 	return ret;
 }
 
-void popen_nsupdate(const char *priv_key, const char *input) {
+static void popen_nsupdate(const char *priv_key, const char *input) {
+	static int tolerance = 5;
 	char command[512];
 	snprintf(command, sizeof(command), "nsupdate -k %s", priv_key);
 	FILE *nsupdate_stdin = popen(command, "we");
@@ -77,8 +78,9 @@ void popen_nsupdate(const char *priv_key, const char *input) {
 	}
 	if (fputs(input, nsupdate_stdin) == EOF ||
 		pclose(nsupdate_stdin)) {
-		fprintf(stderr, "Unhandled error running nsupdate");
-		exit(-1);
+		fprintf(stderr, "Unhandled error running nsupdate. Tolerating %d more failures.\n", --tolerance);
+		if (!tolerance)
+			exit(-1);
 	}
 }
 
