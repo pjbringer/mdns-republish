@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,10 +9,23 @@
 #include <netdb.h>
 
 #include "browse.h"
+#include "resolve.h"
 
 #define GCC_UNUSED __attribute__((unused))
 
 int DEBUG_LEVEL = 0;
+
+struct BrowseData {
+	char *remote_domain;
+	char *server;
+	char *priv_key;
+	int record_ttl;
+};
+
+struct ResolveData {
+	const char* hostname;
+	struct BrowseData g;
+};
 
 /*
  * Resolves a hostname to ipv6 addresses. Return number of addresses found.
@@ -40,7 +54,7 @@ int resolve_ipv6(const char* hostname, struct sockaddr_in6 *res, int res_length)
 		}
 		struct sockaddr_in6* sa6 = (struct sockaddr_in6*) sa;
 		res[ret++] = *sa6;
-		
+
 		//char straddr[INET6_ADDRSTRLEN];
 		//inet_ntop(AF_INET6, sa6->sin6_addr.s6_addr, straddr, INET6_ADDRSTRLEN);
 		//printf("resolve_ipv6: Address is %s\n", straddr);
@@ -90,25 +104,36 @@ static int remove_ipv6(const char *hostname, const char *server, const char *pri
 	return 0;
 }
 
-static int update_ipv6(const char *hostname,  const unsigned char *ip_data, int record_ttl, const char *server, const char *priv_key) {
+static void verify_ipv6_cb(unsigned short sa_family GCC_UNUSED, const void* ip_data, const char* name, void* userdata) {
 	char input[4096];
 	char straddr[INET6_ADDRSTRLEN];
+	struct ResolveData *rd = userdata;
+	struct BrowseData *g = &rd->g;
+	char* pos;
+	assert(rd->hostname);
 
 	inet_ntop(AF_INET6, ip_data, straddr, INET6_ADDRSTRLEN);
-	printf("U %s -> %s\n", hostname, straddr);
 
-	snprintf(input, sizeof(input), "server %s\nupdate delete %s AAAA\nupdate add %s %d AAAA %s\nsend\nquit", server, hostname, hostname, record_ttl, straddr);
-	popen_nsupdate(priv_key, input);
-
-	return 0;
+	if (name==0 || !(pos=strstr(name, ".local")) || strncmp(name, rd->hostname, pos-name)) {
+		if (DEBUG_LEVEL>0) printf("D %s -> %s\n", rd->hostname, straddr);
+		snprintf(input, sizeof(input), "server %s\nupdate delete %s AAAA %s\nsend\nquit", g->server, rd->hostname, straddr);
+		popen_nsupdate(g->priv_key, input);
+	}
+	free((void*)rd->hostname);
+	free(rd);
 }
 
-struct BrowseData {
-	char *remote_domain;
-	char *server;
-	char *priv_key;
-	int record_ttl;
-};
+static void verify_ipv6(const char* hostname, void* clienthandle, struct BrowseData *g) {
+	struct sockaddr_in6 res[10] = {{0}};
+	int addr_i, addr_count = resolve_ipv6(hostname, res, 10);
+	struct ResolveData* rd = malloc(sizeof(struct ResolveData));
+	rd->hostname = strdup(hostname);
+	rd->g = *g;
+
+	for (addr_i=0; addr_i < addr_count; addr_i++) {
+		resolve_address(clienthandle, AF_INET6, res->sin6_addr.s6_addr, verify_ipv6_cb, rd);
+	}
+}
 
 static char *dns_domain_replace(const char *full, const char* old_domain, const char * new_domain) {
 	int llen = strlen(full) - strlen(old_domain);
@@ -120,29 +145,17 @@ static char *dns_domain_replace(const char *full, const char* old_domain, const 
 	return ret;
 }
 
-static void add_address_callback(const char* name, unsigned short sa_family, const unsigned char* data, void* userdata) {
+static void add_address_callback(const char* name, unsigned short sa_family, const unsigned char* data, void* userdata, void* client_handle) {
 	struct BrowseData *g = userdata;
 	if (sa_family != AF_INET6) return;
-	struct sockaddr_in6 res[10] = {{0}};
 	char *hostname = dns_domain_replace(name, "local", g->remote_domain);
 
-	int addr_count = resolve_ipv6(hostname, res, 10);
-	switch(addr_count) {
-	case 0:
-		add_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
-		break;
-	case 1:
-		if (memcmp(res[0].sin6_addr.s6_addr, data, 16))
-			update_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
-		break;
-	default:
-		fprintf(stderr, "Too many AAAA records for %s %d.\n", hostname, addr_count);
-		update_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
-	}
+	add_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
+	verify_ipv6(hostname, client_handle, g);
 	free(hostname);
 }
 
-static void remove_address_callback(const char *name, void *userdata) {
+static void remove_address_callback(const char *name, void *userdata, void* client_handle GCC_UNUSED) {
 	struct BrowseData *g = userdata;
 	char *hostname = dns_domain_replace(name, "local", g->remote_domain);
 

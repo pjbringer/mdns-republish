@@ -24,13 +24,13 @@ struct DiscoveryData {
 	void *clientdata;
 };
 
-void avahi_add_address(const char *name, const AvahiAddress *a, AddAddressCallback cb, void *clientdata) {
+void avahi_add_address(const char *name, const AvahiAddress *a, AddAddressCallback cb, void *clientdata, AvahiClient *client) {
 	unsigned short sa_family = a->proto == AVAHI_PROTO_INET ? AF_INET : AF_INET6;
-	cb(name, sa_family, a->data.data, clientdata);
+	cb(name, sa_family, a->data.data, clientdata, client);
 }
 
-void avahi_remove_address(const char *name, RemoveAddressCallback cb, void *clientdata) {
-	cb(name, clientdata);
+void avahi_remove_address(const char *name, RemoveAddressCallback cb, void *clientdata, AvahiClient *client) {
+	cb(name, clientdata, client);
 }
 
 static void avahi_service_resolver_callback(
@@ -51,10 +51,9 @@ static void avahi_service_resolver_callback(
 	struct DiscoveryData *user = (struct DiscoveryData*) userdata;
 	switch(event) {
 	case AVAHI_RESOLVER_FOUND:
-		assert(user->proto == AVAHI_PROTO_UNSPEC || user->proto == a->proto);
-		//avahi_address_snprint(straddr, AVAHI_ADDRESS_STR_MAX, a);
-		//printf("%s (%s) in domain %s was resolved to %s:%d (%s:%d)\n", name, type, domain, hostname, port, straddr, port);
-		avahi_add_address(hostname, a, user->add_address_callback, user->clientdata);
+		assert(user);
+		assert(user->proto == AVAHI_PROTO_UNSPEC || (a && user->proto == a->proto));
+		avahi_add_address(hostname, a, user->add_address_callback, user->clientdata, user->client);
 		break;
 	case AVAHI_RESOLVER_FAILURE:
 		if (DEBUG_LEVEL>0) fprintf(stderr, "Failure in avahi_service_resolver for %s\n", hostname);
@@ -109,7 +108,6 @@ static void avahi_client_callback(AvahiClient *client, AvahiClientState state, v
 	case AVAHI_CLIENT_S_REGISTERING:
 	case AVAHI_CLIENT_S_COLLISION:
 	case AVAHI_CLIENT_CONNECTING:
-		//ignore
 		break;
 	case AVAHI_CLIENT_FAILURE:
 		fprintf(stderr, "Client failure\n");
@@ -118,18 +116,6 @@ static void avahi_client_callback(AvahiClient *client, AvahiClientState state, v
 		fprintf(stderr, "Unexpected case in avahi_client_callback: %d\n", state);
 	}
 }
-
-#if 0
-void add_addr(const char *hostname, unsigned short sa_family, const unsigned char *data) {
-	char straddr[50];
-	inet_ntop(sa_family, data, straddr, 50);
-	printf("Adding %s -> %s\n", hostname, straddr);
-}
-
-void remove_addr(const char *hostname) {
-	printf("Removing %s\n", hostname);
-}
-#endif
 
 static AvahiProtocol AvahiProtoFromSpec(const char *addr_spec) {
 	if (!addr_spec) return AVAHI_PROTO_UNSPEC;
@@ -141,8 +127,6 @@ static AvahiProtocol AvahiProtoFromSpec(const char *addr_spec) {
 }
 
 void find_machines(const char *addr_spec, AddAddressCallback add_addr, RemoveAddressCallback remove_addr, void *clientdata) {
-	int error;
-
 	struct DiscoveryData userdata = {0};
 	int error = 0;
 
@@ -153,10 +137,6 @@ void find_machines(const char *addr_spec, AddAddressCallback add_addr, RemoveAdd
 	}
 
 	const AvahiPoll *poll = avahi_simple_poll_get(simple_poll);
-	if (!poll) {
-		fprintf(stderr, "Could not create poll");
-		goto cleanup_simple_poll;
-	}
 	AvahiClient *client = avahi_client_new(poll, 0, avahi_client_callback, &userdata, &error);
 	if (error) {
 		fprintf(stderr, avahi_strerror(error));
@@ -172,7 +152,6 @@ void find_machines(const char *addr_spec, AddAddressCallback add_addr, RemoveAdd
 
 	if (userdata.browser)
 		avahi_service_browser_free(userdata.browser);
-cleanup_simple_poll:
 cleanup_client:
 	if (client) avahi_client_free(client);
 	avahi_simple_poll_free(simple_poll);
