@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #include "browse.h"
 #include "resolve.h"
@@ -83,6 +84,9 @@ static void popen_nsupdate(const char *priv_key, const char *input) {
 		if (!tolerance)
 			exit(-1);
 	}
+	// Apparently server does nothing if rushed (ddos protection of some kind)
+	// So we pace our-self. We're in not rush anyway
+	usleep(100000);
 }
 
 static int add_ipv6(const char *hostname, const unsigned char *ip_data, int record_ttl, const char *server, const char *priv_key) {
