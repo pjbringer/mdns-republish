@@ -82,7 +82,7 @@ void popen_nsupdate(const char *priv_key, const char *input) {
 	}
 }
 
-static int add_ipv6(const char *hostname,  const unsigned char *ip_data, int record_ttl, const char *server, const char *priv_key) {
+static int add_ipv6(const char *hostname, const unsigned char *ip_data, int record_ttl, const char *server, const char *priv_key) {
 	char input[4096];
 	char straddr[INET6_ADDRSTRLEN];
 
@@ -147,7 +147,7 @@ static char *dns_domain_replace(const char *full, const char* old_domain, const 
 
 static void add_address_callback(const char* name, unsigned short sa_family, const unsigned char* data, void* userdata, void* client_handle) {
 	struct BrowseData *g = userdata;
-	if (sa_family != AF_INET6) return;
+	if (sa_family != AF_INET6 || IN6_IS_ADDR_LINKLOCAL(data)) return;
 	char *hostname = dns_domain_replace(name, "local", g->remote_domain);
 
 	add_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
