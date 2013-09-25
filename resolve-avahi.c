@@ -8,6 +8,7 @@
 
 #include <address.h>
 #include <client.h>
+#include <error.h>
 #include <lookup.h>
 
 #include "resolve.h"
@@ -34,6 +35,7 @@ void avahi_address_resolver_callback(
 	AvahiLookupResultFlags flags GCC_UNUSED,
 	void *userdata) {
 
+	AvahiClient *client;
 	char straddr[INET6_ADDRSTRLEN];
 	inet_ntop(AF_INET6, a->data.data, straddr, INET6_ADDRSTRLEN);
 	struct ResolveAddressData *rd = userdata;
@@ -44,10 +46,13 @@ void avahi_address_resolver_callback(
 			avahi_resolution(a, name, rd);
 			break;
 		case AVAHI_RESOLVER_FAILURE:
-			{
-			char addr_str[AVAHI_ADDRESS_STR_MAX];
-			avahi_address_snprint(addr_str, AVAHI_ADDRESS_STR_MAX, a);
-			fprintf(stderr, "Failed on resolution of %s.\n", addr_str);
+			client = avahi_address_resolver_get_client(r);
+			if (client && avahi_client_errno(client)==AVAHI_ERR_TIMEOUT) {
+				avahi_resolution(a, NULL, rd);
+			} else {
+				char addr_str[AVAHI_ADDRESS_STR_MAX];
+				avahi_address_snprint(addr_str, AVAHI_ADDRESS_STR_MAX, a);
+				fprintf(stderr, "Failed to resolve host name '%s': %s\n", addr_str, avahi_strerror(avahi_client_errno(client)));
 			}
 			break;
 	}
