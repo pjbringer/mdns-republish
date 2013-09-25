@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
 	char *remote_domain = NULL;
 	char *dns_server = NULL;
 	char *priv_key = NULL;
-	int record_ttl = 7200;
+	int record_ttl = 600;
 
 	argc--; argv++;
 
