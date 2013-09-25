@@ -5,6 +5,7 @@
 
 #include <arpa/inet.h>
 
+#include <error.h>
 #include <client.h>
 #include <lookup.h>
 #include <simple-watch.h>
@@ -56,7 +57,7 @@ static void avahi_service_resolver_callback(
 		avahi_add_address(hostname, a, user->add_address_callback, user->clientdata);
 		break;
 	case AVAHI_RESOLVER_FAILURE:
-		fprintf(stderr, "Failure in avahi_service_resolver for %s\n", hostname);
+		if (DEBUG_LEVEL>0) fprintf(stderr, "Failure in avahi_service_resolver for %s\n", hostname);
 		break;
 	default:
 		fprintf(stderr, "Unexepected case in avahi_service_resolver_callback: %d\n", event);
@@ -143,6 +144,8 @@ void find_machines(const char *addr_spec, AddAddressCallback add_addr, RemoveAdd
 	int error;
 
 	struct DiscoveryData userdata = {0};
+	int error = 0;
+
 	AvahiSimplePoll *simple_poll = avahi_simple_poll_new();
 	if (!simple_poll) {
 		fprintf(stderr, "Could not create simple poll");
@@ -155,6 +158,10 @@ void find_machines(const char *addr_spec, AddAddressCallback add_addr, RemoveAdd
 		goto cleanup_simple_poll;
 	}
 	AvahiClient *client = avahi_client_new(poll, 0, avahi_client_callback, &userdata, &error);
+	if (error) {
+		fprintf(stderr, avahi_strerror(error));
+		goto cleanup_client;
+	}
 	userdata.client = client;
 	userdata.proto = AvahiProtoFromSpec(addr_spec);
 	userdata.add_address_callback = add_addr;
@@ -166,6 +173,8 @@ void find_machines(const char *addr_spec, AddAddressCallback add_addr, RemoveAdd
 	if (userdata.browser)
 		avahi_service_browser_free(userdata.browser);
 cleanup_simple_poll:
+cleanup_client:
+	if (client) avahi_client_free(client);
 	avahi_simple_poll_free(simple_poll);
 }
 

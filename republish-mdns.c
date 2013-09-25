@@ -11,6 +11,8 @@
 
 #define GCC_UNUSED __attribute__((unused))
 
+int DEBUG_LEVEL = 0;
+
 /*
  * Resolves a hostname to ipv6 addresses. Return number of addresses found.
  */
@@ -71,7 +73,7 @@ static int add_ipv6(const char *hostname,  const unsigned char *ip_data, int rec
 	char straddr[INET6_ADDRSTRLEN];
 
 	inet_ntop(AF_INET6, ip_data, straddr, INET6_ADDRSTRLEN);
-	printf("A %s -> %s\n", hostname, straddr);
+	if (DEBUG_LEVEL>0) printf("A %s -> %s\n", hostname, straddr);
 
 	snprintf(input, sizeof(input), "server %s\nupdate add %s %d AAAA %s\nsend\nquit", server, hostname, record_ttl, straddr);
 	popen_nsupdate(priv_key, input);
@@ -162,6 +164,8 @@ int main(int argc, char **argv) {
 		if (strcmp(argv[0], "-h")==0) {
 			printf("Usage: publish-dns -k private_key_file -d remote_domain -s dns_server [-t record_ttl]\n");
 			exit(0);
+		} else if (strcmp(argv[0], "-v") == 0) {
+			DEBUG_LEVEL=1;
 		} else if (strcmp(argv[0], "-k")==0 && argc>1) {
 			priv_key = argv[1];
 			argc--; argv++;
