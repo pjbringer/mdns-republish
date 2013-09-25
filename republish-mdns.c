@@ -25,6 +25,7 @@ struct BrowseData {
 struct ResolveData {
 	const char* hostname;
 	struct BrowseData g;
+	int refC;
 };
 
 /*
@@ -116,24 +117,14 @@ static void verify_ipv6_cb(unsigned short sa_family GCC_UNUSED, const void* ip_d
 
 	inet_ntop(AF_INET6, ip_data, straddr, INET6_ADDRSTRLEN);
 
-	if (name==0 || !(pos=strstr(name, ".local")) || strncmp(name, rd->hostname, pos-name)) {
-		if (DEBUG_LEVEL>0) printf("D %s -> %s\n", rd->hostname, straddr);
+	if (name==0 || !(pos=strstr(name, ".local")) || strcmp(pos, ".local") || strncmp(name, rd->hostname, pos-name)) {
+		if (DEBUG_LEVEL>0) printf("D %s -> %s on server %s\n", rd->hostname, straddr, g->server);
 		snprintf(input, sizeof(input), "server %s\nupdate delete %s AAAA %s\nsend\nquit", g->server, rd->hostname, straddr);
 		popen_nsupdate(g->priv_key, input);
 	}
-	free((void*)rd->hostname);
-	free(rd);
-}
-
-static void verify_ipv6(const char* hostname, void* clienthandle, struct BrowseData *g) {
-	struct sockaddr_in6 res[10] = {{0}};
-	int addr_i, addr_count = resolve_ipv6(hostname, res, 10);
-	struct ResolveData* rd = malloc(sizeof(struct ResolveData));
-	rd->hostname = strdup(hostname);
-	rd->g = *g;
-
-	for (addr_i=0; addr_i < addr_count; addr_i++) {
-		resolve_address(clienthandle, AF_INET6, res->sin6_addr.s6_addr, verify_ipv6_cb, rd);
+	if (--(rd->refC) == 0) {
+		free((void*)rd->hostname);
+		free(rd);
 	}
 }
 
@@ -148,12 +139,33 @@ static char *dns_domain_replace(const char *full, const char* old_domain, const 
 }
 
 static void add_address_callback(const char* name, unsigned short sa_family, const unsigned char* data, void* userdata, void* client_handle) {
+	struct sockaddr_in6 res[10] = {{0}};
 	struct BrowseData *g = userdata;
 	if (sa_family != AF_INET6 || IN6_IS_ADDR_LINKLOCAL(data)) return;
 	char *hostname = dns_domain_replace(name, "local", g->remote_domain);
+	int already_seen = 0;
 
-	add_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
-	verify_ipv6(hostname, client_handle, g);
+	int addr_i, addr_count = resolve_ipv6(hostname, res, 10);
+
+	struct ResolveData* rd = malloc(sizeof(struct ResolveData));
+	rd->hostname = strdup(hostname);
+	rd->g = *g;
+	rd->refC = 0;
+
+	for (addr_i=0; addr_i < addr_count; addr_i++) {
+		if (DEBUG_LEVEL) {
+			char straddr[INET6_ADDRSTRLEN];
+			inet_ntop(AF_INET6, res[addr_i].sin6_addr.s6_addr, straddr, INET6_ADDRSTRLEN);
+			if (DEBUG_LEVEL>1) printf("? %s -> %s (so %d)\n", hostname, straddr, memcmp(data, res[addr_i].sin6_addr.s6_addr, 16));
+		}
+		if (memcmp(data, res[addr_i].sin6_addr.s6_addr, 16)) {
+			resolve_address(client_handle, AF_INET6, res[addr_i].sin6_addr.s6_addr, verify_ipv6_cb, rd);
+			rd->refC++;
+		} else
+			already_seen = 1;
+	}
+	if (!already_seen)
+		add_ipv6(hostname, data, g->record_ttl, g->server, g->priv_key);
 	free(hostname);
 }
 
